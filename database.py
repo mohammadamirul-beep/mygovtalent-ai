@@ -1,14 +1,25 @@
+import random
 import sqlite3
+from pathlib import Path
+
 import pandas as pd
 
 DB_NAME = "mygovtalent.db"
 
+
+# =====================================================
+# CONNECTION
+# =====================================================
 
 def get_connection():
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn
 
+
+# =====================================================
+# TABLES
+# =====================================================
 
 def create_tables():
     conn = get_connection()
@@ -103,6 +114,20 @@ def create_tables():
     """)
 
     cur.execute("""
+    CREATE TABLE IF NOT EXISTS interviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        application_id INTEGER,
+        interview_date TEXT,
+        interview_time TEXT,
+        interview_location TEXT,
+        interview_panel TEXT,
+        result TEXT,
+        remarks TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS placements (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         application_id INTEGER,
@@ -128,49 +153,28 @@ def create_tables():
     )
     """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS interviews(
-
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-    application_id INTEGER,
-
-    interview_date TEXT,
-
-    interview_time TEXT,
-
-    interview_location TEXT,
-
-    interview_panel TEXT,
-
-    result TEXT,
-
-    remarks TEXT
-    )
-    """)
-
     conn.commit()
     conn.close()
 
 
+# =====================================================
+# SEED USERS / LOGIN
+# =====================================================
+
 def seed_users():
     users = [
         ("pemohon@moe.gov.my", "Pemohon Demo", "Applicant", "", "", "Active"),
-        ("bahagian@moe.gov.my", "Pegawai Bahagian Baru", "Department", "Bahagian Baru", "", "Active"),
+        ("bahagian@moe.gov.my", "Pegawai Bahagian Demo", "Department", "Bahagian Pengurusan Sumber Manusia", "", "Active"),
+        ("pengarah@moe.gov.my", "Pengarah Bahagian Demo", "Director", "Bahagian Pengurusan Sumber Manusia", "", "Active"),
         ("bpsm@moe.gov.my", "Admin BPSM Demo", "BPSM", "BPSM", "", "Active"),
-        ("pengarah@moe.gov.my","Pengarah Bahagian Asal","Director","Bahagian Pengurusan Sumber Manusia","","Active"),
     ]
 
     conn = get_connection()
     cur = conn.cursor()
-
     cur.executemany("""
-    INSERT OR IGNORE INTO users (
-        email, name, role, department, phone, status
-    )
+    INSERT OR IGNORE INTO users (email, name, role, department, phone, status)
     VALUES (?, ?, ?, ?, ?, ?)
     """, users)
-
     conn.commit()
     conn.close()
 
@@ -187,10 +191,7 @@ def get_user(email):
 def save_otp(email, otp):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO otp_logs (email, otp) VALUES (?, ?)",
-        (email, otp)
-    )
+    cur.execute("INSERT INTO otp_logs (email, otp) VALUES (?, ?)", (email, otp))
     conn.commit()
     conn.close()
 
@@ -199,28 +200,25 @@ def verify_saved_otp(email, otp):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-    SELECT *
-    FROM otp_logs
+    SELECT * FROM otp_logs
     WHERE email=? AND otp=?
     ORDER BY id DESC
     LIMIT 1
     """, (email, otp))
     data = cur.fetchone()
-
     if data:
-        cur.execute(
-            "UPDATE otp_logs SET verified=1 WHERE id=?",
-            (data["id"],)
-        )
+        cur.execute("UPDATE otp_logs SET verified=1 WHERE id=?", (data["id"],))
         conn.commit()
-
     conn.close()
     return data is not None
 
 
+# =====================================================
+# MASTER DATA
+# =====================================================
+
 def import_master_data(file_path):
     conn = get_connection()
-
     sheets = {
         "Organizations": "organizations",
         "Grades": "grades",
@@ -233,24 +231,20 @@ def import_master_data(file_path):
         "States": "states",
         "Districts": "districts",
     }
-
     for sheet, table in sheets.items():
         df = pd.read_excel(file_path, sheet_name=sheet)
         df.to_sql(table, conn, if_exists="replace", index=False)
-
     conn.close()
 
 
 def get_dropdown(table, column):
     conn = get_connection()
     cur = conn.cursor()
-
     try:
         cur.execute(f'SELECT DISTINCT "{column}" FROM "{table}" ORDER BY "{column}"')
-        data = [row[0] for row in cur.fetchall() if row[0] is not None]
+        data = [row[0] for row in cur.fetchall() if row[0] not in (None, "")]
     except Exception:
         data = []
-
     conn.close()
     return data
 
@@ -258,49 +252,65 @@ def get_dropdown(table, column):
 def get_organizations():
     conn = get_connection()
     cur = conn.cursor()
-
     try:
         cur.execute("""
-        SELECT name
-        FROM organizations
+        SELECT name FROM organizations
         WHERE status='Active'
         ORDER BY name
         """)
-        data = [row[0] for row in cur.fetchall()]
+        data = [row[0] for row in cur.fetchall() if row[0]]
     except Exception:
         data = []
-
     conn.close()
     return data
 
 
+# =====================================================
+# COUNTS
+# =====================================================
+
+def count_profiles():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM employee_profiles")
+    total = cur.fetchone()[0]
+    conn.close()
+    return total
+
+
+def count_vacancies():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM vacancies")
+    total = cur.fetchone()[0]
+    conn.close()
+    return total
+
+
+def count_applications():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM applications")
+    total = cur.fetchone()[0]
+    conn.close()
+    return total
+
+
+# =====================================================
+# PROFILE
+# =====================================================
+
 def save_profile(data):
     conn = get_connection()
     cur = conn.cursor()
-
     cur.execute("""
     INSERT OR REPLACE INTO employee_profiles (
-        email,
-        name,
-        ic,
-        phone,
-        current_department,
-        current_position,
-        grade,
-        home_address,
-        state,
-        district,
-        academic,
-        professional,
-        specialization,
-        experience,
-        certification,
-        course,
-        language
+        email, name, ic, phone, current_department, current_position, grade,
+        home_address, state, district, academic, professional, specialization,
+        experience, certification, course, language
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, data)
-
     conn.commit()
     conn.close()
 
@@ -314,32 +324,21 @@ def get_profile(email):
     return data
 
 
+# =====================================================
+# VACANCIES
+# =====================================================
+
 def add_vacancy(data):
     conn = get_connection()
     cur = conn.cursor()
-
     cur.execute("""
     INSERT INTO vacancies (
-        title,
-        department,
-        location,
-        state,
-        district,
-        academic,
-        professional,
-        specialization,
-        experience,
-        certification,
-        course,
-        language,
-        closing_date,
-        interview_required,
-        status,
-        created_by
+        title, department, location, state, district, academic, professional,
+        specialization, experience, certification, course, language,
+        closing_date, interview_required, status, created_by
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, data)
-
     conn.commit()
     conn.close()
 
@@ -357,8 +356,7 @@ def get_active_vacancies():
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-    SELECT *
-    FROM vacancies
+    SELECT * FROM vacancies
     WHERE status='Active'
     ORDER BY closing_date
     """)
@@ -376,28 +374,34 @@ def get_vacancy(vacancy_id):
     return data
 
 
-def add_application(vacancy_id, applicant_email, score=0, status="Menunggu Kelulusan Pengarah"):
+# =====================================================
+# APPLICATIONS
+# =====================================================
+
+def add_application(vacancy_id, applicant_email, score=0, status="Menunggu Kelulusan Pengarah Bahagian Asal"):
     conn = get_connection()
     cur = conn.cursor()
+    existing = cur.execute("""
+        SELECT id FROM applications
+        WHERE vacancy_id=? AND applicant_email=?
+    """, (vacancy_id, applicant_email)).fetchone()
+    if existing:
+        conn.close()
+        return existing["id"]
 
     cur.execute("""
-    INSERT INTO applications (
-        vacancy_id,
-        applicant_email,
-        score,
-        status
-    )
+    INSERT INTO applications (vacancy_id, applicant_email, score, status)
     VALUES (?, ?, ?, ?)
     """, (vacancy_id, applicant_email, score, status))
-
+    app_id = cur.lastrowid
     conn.commit()
     conn.close()
+    return app_id
 
 
 def get_my_applications(email):
     conn = get_connection()
     cur = conn.cursor()
-
     cur.execute("""
     SELECT
         a.id,
@@ -412,7 +416,6 @@ def get_my_applications(email):
     WHERE a.applicant_email=?
     ORDER BY a.submitted_at DESC
     """, (email,))
-
     data = cur.fetchall()
     conn.close()
     return data
@@ -421,7 +424,6 @@ def get_my_applications(email):
 def get_applications_by_vacancy(vacancy_id):
     conn = get_connection()
     cur = conn.cursor()
-
     cur.execute("""
     SELECT
         a.id,
@@ -430,6 +432,8 @@ def get_applications_by_vacancy(vacancy_id):
         a.score,
         a.status,
         a.submitted_at,
+        v.title,
+        v.department AS target_department,
         p.name,
         p.current_department,
         p.current_position,
@@ -440,55 +444,75 @@ def get_applications_by_vacancy(vacancy_id):
         p.experience,
         p.certification,
         p.course,
+        p.language,
         p.state,
         p.district
     FROM applications a
+    LEFT JOIN vacancies v ON a.vacancy_id = v.id
     LEFT JOIN employee_profiles p ON a.applicant_email = p.email
     WHERE a.vacancy_id=?
     ORDER BY a.score DESC
     """, (vacancy_id,))
-
     data = cur.fetchall()
     conn.close()
     return data
 
 
-def update_application_score(application_id, score):
+def get_all_application_details():
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "UPDATE applications SET score=? WHERE id=?",
-        (score, application_id)
-    )
-    conn.commit()
+    cur.execute("""
+    SELECT
+        a.id,
+        a.vacancy_id,
+        a.applicant_email,
+        a.score,
+        a.status,
+        a.submitted_at,
+        v.title,
+        v.department AS target_department,
+        p.name,
+        p.current_department,
+        p.current_position,
+        p.grade
+    FROM applications a
+    LEFT JOIN vacancies v ON a.vacancy_id = v.id
+    LEFT JOIN employee_profiles p ON a.applicant_email = p.email
+    ORDER BY a.submitted_at DESC
+    """)
+    data = cur.fetchall()
     conn.close()
+    return data
 
 
 def update_application_status(application_id, status):
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        "UPDATE applications SET status=? WHERE id=?",
-        (status, application_id)
-    )
+    cur.execute("UPDATE applications SET status=? WHERE id=?", (status, application_id))
     conn.commit()
     conn.close()
 
 
+def update_application_score(application_id, score):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE applications SET score=? WHERE id=?", (score, application_id))
+    conn.commit()
+    conn.close()
+
+
+# =====================================================
+# OPEN APPLICATIONS
+# =====================================================
+
 def add_open_application(email, status="Menunggu Kekosongan"):
     conn = get_connection()
     cur = conn.cursor()
-
     cur.execute("""
-    INSERT INTO open_applications (
-        applicant_email,
-        status
-    )
+    INSERT INTO open_applications (applicant_email, status)
     VALUES (?, ?)
     """, (email, status))
-
     app_id = cur.lastrowid
-
     conn.commit()
     conn.close()
     return app_id
@@ -497,16 +521,10 @@ def add_open_application(email, status="Menunggu Kekosongan"):
 def add_open_application_preference(application_id, department, priority):
     conn = get_connection()
     cur = conn.cursor()
-
     cur.execute("""
-    INSERT INTO open_applications_preferences (
-        application_id,
-        department,
-        priority
-    )
+    INSERT INTO open_applications_preferences (application_id, department, priority)
     VALUES (?, ?, ?)
     """, (application_id, department, priority))
-
     conn.commit()
     conn.close()
 
@@ -514,15 +532,12 @@ def add_open_application_preference(application_id, department, priority):
 def get_my_open_application(email):
     conn = get_connection()
     cur = conn.cursor()
-
     cur.execute("""
-    SELECT *
-    FROM open_applications
+    SELECT * FROM open_applications
     WHERE applicant_email=?
     ORDER BY submitted_at DESC
     LIMIT 1
     """, (email,))
-
     data = cur.fetchone()
     conn.close()
     return data
@@ -531,53 +546,102 @@ def get_my_open_application(email):
 def get_open_preferences(application_id):
     conn = get_connection()
     cur = conn.cursor()
-
     cur.execute("""
-    SELECT *
-    FROM open_applications_preferences
+    SELECT * FROM open_applications_preferences
     WHERE application_id=?
     ORDER BY priority
     """, (application_id,))
-
     data = cur.fetchall()
     conn.close()
     return data
 
 
+# =====================================================
+# INTERVIEW
+# =====================================================
+
+def add_interview(data):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+    INSERT INTO interviews (
+        application_id, interview_date, interview_time, interview_location,
+        interview_panel, result, remarks
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, data)
+    conn.commit()
+    conn.close()
+
+
+def get_interview(application_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM interviews WHERE application_id=?", (application_id,))
+    data = cur.fetchone()
+    conn.close()
+    return data
+
+
+def update_interview_result(application_id, result, remarks):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+    UPDATE interviews
+    SET result=?, remarks=?
+    WHERE application_id=?
+    """, (result, remarks, application_id))
+    conn.commit()
+    conn.close()
+
+
+# =====================================================
+# PLACEMENTS / BPSM
+# =====================================================
+
 def send_to_bpsm(application_id, applicant_email, vacancy_id, department, remarks=""):
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-    INSERT INTO placements (
-        application_id,
-        applicant_email,
-        vacancy_id,
-        department,
-        department_status,
-        bpsm_status,
-        placement_order,
-        placement_date,
-        remarks
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        application_id,
-        applicant_email,
-        vacancy_id,
-        department,
-        "Diperakukan Bahagian",
-        "Menunggu Semakan BPSM",
-        "",
-        "",
-        remarks
-    ))
+    existing = cur.execute("""
+        SELECT id FROM placements WHERE application_id=?
+    """, (application_id,)).fetchone()
 
-    cur.execute(
-        "UPDATE applications SET status=? WHERE id=?",
-        ("Dihantar ke BPSM", application_id)
-    )
+    if existing:
+        cur.execute("""
+        UPDATE placements
+        SET applicant_email=?, vacancy_id=?, department=?, department_status=?,
+            bpsm_status=?, remarks=?
+        WHERE application_id=?
+        """, (
+            applicant_email,
+            vacancy_id,
+            department,
+            "Diperakukan Bahagian",
+            "Menunggu Semakan BPSM",
+            remarks,
+            application_id,
+        ))
+    else:
+        cur.execute("""
+        INSERT INTO placements (
+            application_id, applicant_email, vacancy_id, department,
+            department_status, bpsm_status, placement_order, placement_date, remarks
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            application_id,
+            applicant_email,
+            vacancy_id,
+            department,
+            "Diperakukan Bahagian",
+            "Menunggu Semakan BPSM",
+            "",
+            "",
+            remarks,
+        ))
 
+    cur.execute("UPDATE applications SET status=? WHERE id=?", ("Dihantar ke BPSM", application_id))
     conn.commit()
     conn.close()
 
@@ -585,13 +649,19 @@ def send_to_bpsm(application_id, applicant_email, vacancy_id, department, remark
 def get_placements():
     conn = get_connection()
     cur = conn.cursor()
-
     cur.execute("""
-    SELECT *
-    FROM placements
-    ORDER BY created_at DESC
+    SELECT
+        pl.*,
+        p.name,
+        p.current_position,
+        p.grade,
+        v.title,
+        v.department AS target_department
+    FROM placements pl
+    LEFT JOIN employee_profiles p ON pl.applicant_email = p.email
+    LEFT JOIN vacancies v ON pl.vacancy_id = v.id
+    ORDER BY pl.created_at DESC
     """)
-
     data = cur.fetchall()
     conn.close()
     return data
@@ -600,155 +670,69 @@ def get_placements():
 def update_bpsm_status(placement_id, status, order_no="", placement_date="", remarks=""):
     conn = get_connection()
     cur = conn.cursor()
-
     cur.execute("""
     UPDATE placements
-    SET
-        bpsm_status=?,
-        placement_order=?,
-        placement_date=?,
-        remarks=?
+    SET bpsm_status=?, placement_order=?, placement_date=?, remarks=?
     WHERE id=?
     """, (status, order_no, placement_date, remarks, placement_id))
-
     conn.commit()
     conn.close()
 
-def add_interview(data):
 
-    conn = get_connection()
-    cur = conn.cursor()
+# =====================================================
+# EXCEL IMPORT / DEMO DATA
+# =====================================================
 
-    cur.execute("""
-    INSERT INTO interviews(
+def _clean_value(value):
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
 
-        application_id,
-        interview_date,
-        interview_time,
-        interview_location,
-        interview_panel,
-        result,
-        remarks
-
-    )
-
-    VALUES(?,?,?,?,?,?,?)
-
-    """, data)
-
-    conn.commit()
-    conn.close()
-
-def get_interview(application_id):
-
-    conn = get_connection()
-
-    cur = conn.cursor()
-
-    cur.execute("""
-
-    SELECT *
-
-    FROM interviews
-
-    WHERE application_id=?
-
-    """,(application_id,))
-
-    data = cur.fetchone()
-
-    conn.close()
-
-    return data
-
-def update_interview_result(application_id,result,remarks):
-
-    conn=get_connection()
-
-    cur=conn.cursor()
-
-    cur.execute("""
-
-    UPDATE interviews
-
-    SET
-
-    result=?,
-    remarks=?
-
-    WHERE application_id=?
-
-    """,(result,remarks,application_id))
-
-    conn.commit()
-
-    conn.close()
 
 def import_applicants_excel(file_path):
     df = pd.read_excel(file_path)
-
     conn = get_connection()
     cur = conn.cursor()
 
     for _, row in df.iterrows():
-        email = str(row.get("email", "")).strip()
-
-        if email == "":
+        email = _clean_value(row.get("email", ""))
+        if not email:
             continue
 
+        name = _clean_value(row.get("name", ""))
+        phone = _clean_value(row.get("phone", ""))
+        current_department = _clean_value(row.get("current_department", ""))
+
         cur.execute("""
-        INSERT OR IGNORE INTO users (
-            email, name, role, department, phone, status
-        )
+        INSERT OR IGNORE INTO users (email, name, role, department, phone, status)
         VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            email,
-            row.get("name", ""),
-            "Applicant",
-            row.get("current_department", ""),
-            row.get("phone", ""),
-            "Active"
-        ))
+        """, (email, name, "Applicant", current_department, phone, "Active"))
 
         cur.execute("""
         INSERT OR REPLACE INTO employee_profiles (
-            email,
-            name,
-            ic,
-            phone,
-            current_department,
-            current_position,
-            grade,
-            home_address,
-            state,
-            district,
-            academic,
-            professional,
-            specialization,
-            experience,
-            certification,
-            course,
-            language
+            email, name, ic, phone, current_department, current_position, grade,
+            home_address, state, district, academic, professional, specialization,
+            experience, certification, course, language
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             email,
-            row.get("name", ""),
-            row.get("ic", ""),
-            row.get("phone", ""),
-            row.get("current_department", ""),
-            row.get("current_position", ""),
-            row.get("grade", ""),
-            row.get("home_address", ""),
-            row.get("state", ""),
-            row.get("district", ""),
-            row.get("academic", ""),
-            row.get("professional", ""),
-            row.get("specialization", ""),
-            int(row.get("experience", 0)),
-            row.get("certification", ""),
-            row.get("course", ""),
-            row.get("language", "")
+            name,
+            _clean_value(row.get("ic", "")),
+            phone,
+            current_department,
+            _clean_value(row.get("current_position", "")),
+            _clean_value(row.get("grade", "")),
+            _clean_value(row.get("home_address", "")),
+            _clean_value(row.get("state", "")),
+            _clean_value(row.get("district", "")),
+            _clean_value(row.get("academic", "")),
+            _clean_value(row.get("professional", "")),
+            _clean_value(row.get("specialization", "")),
+            int(row.get("experience", 0)) if not pd.isna(row.get("experience", 0)) else 0,
+            _clean_value(row.get("certification", "")),
+            _clean_value(row.get("course", "")),
+            _clean_value(row.get("language", "")),
         ))
 
     conn.commit()
@@ -757,96 +741,54 @@ def import_applicants_excel(file_path):
 
 def import_vacancies_excel(file_path, created_by="system"):
     df = pd.read_excel(file_path)
-
     conn = get_connection()
     cur = conn.cursor()
 
     for _, row in df.iterrows():
         cur.execute("""
         INSERT INTO vacancies (
-            title,
-            department,
-            location,
-            state,
-            district,
-            academic,
-            professional,
-            specialization,
-            experience,
-            certification,
-            course,
-            language,
-            closing_date,
-            interview_required,
-            status,
-            created_by
+            title, department, location, state, district, academic, professional,
+            specialization, experience, certification, course, language,
+            closing_date, interview_required, status, created_by
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            row.get("title", ""),
-            row.get("department", ""),
-            row.get("location", ""),
-            row.get("state", ""),
-            row.get("district", ""),
-            row.get("academic", ""),
-            row.get("professional", ""),
-            row.get("specialization", ""),
-            int(row.get("experience", 0)),
-            row.get("certification", ""),
-            row.get("course", ""),
-            row.get("language", ""),
-            str(row.get("closing_date", "")),
-            row.get("interview_required", "Tidak"),
-            row.get("status", "Active"),
-            created_by
+            _clean_value(row.get("title", "")),
+            _clean_value(row.get("department", "")),
+            _clean_value(row.get("location", "")),
+            _clean_value(row.get("state", "")),
+            _clean_value(row.get("district", "")),
+            _clean_value(row.get("academic", "")),
+            _clean_value(row.get("professional", "")),
+            _clean_value(row.get("specialization", "")),
+            int(row.get("experience", 0)) if not pd.isna(row.get("experience", 0)) else 0,
+            _clean_value(row.get("certification", "")),
+            _clean_value(row.get("course", "")),
+            _clean_value(row.get("language", "")),
+            _clean_value(row.get("closing_date", "")),
+            _clean_value(row.get("interview_required", "Tidak")) or "Tidak",
+            _clean_value(row.get("status", "Active")) or "Active",
+            created_by,
         ))
 
     conn.commit()
     conn.close()
 
-def count_profiles():
-
-    conn = get_connection()
-
-    cur = conn.cursor()
-
-    cur.execute("SELECT COUNT(*) FROM employee_profiles")
-
-    total = cur.fetchone()[0]
-
-    conn.close()
-
-    return total
-
-
-def count_vacancies():
-
-    conn = get_connection()
-
-    cur = conn.cursor()
-
-    cur.execute("SELECT COUNT(*) FROM vacancies")
-
-    total = cur.fetchone()[0]
-
-    conn.close()
-
-    return total
 
 def auto_generate_dummy_applications(limit_per_applicant=2):
-    import random
+    from utils.ai_engine import calculate_ai_match
 
     conn = get_connection()
     cur = conn.cursor()
 
     profiles = cur.execute("""
-        SELECT email, academic, specialization, experience, certification, course
+        SELECT *
         FROM employee_profiles
         WHERE email LIKE 'pemohon%'
     """).fetchall()
 
     vacancies = cur.execute("""
-        SELECT id
+        SELECT *
         FROM vacancies
         WHERE status='Active'
     """).fetchall()
@@ -858,10 +800,7 @@ def auto_generate_dummy_applications(limit_per_applicant=2):
     total_created = 0
 
     for profile in profiles:
-        selected_vacancies = random.sample(
-            vacancies,
-            min(limit_per_applicant, len(vacancies))
-        )
+        selected_vacancies = random.sample(vacancies, min(limit_per_applicant, len(vacancies)))
 
         for vacancy in selected_vacancies:
             existing = cur.execute("""
@@ -873,34 +812,48 @@ def auto_generate_dummy_applications(limit_per_applicant=2):
             if existing:
                 continue
 
-            score = random.randint(60, 98)
+            score, _, _ = calculate_ai_match(profile, vacancy)
 
             cur.execute("""
-                INSERT INTO applications (
-                    vacancy_id,
-                    applicant_email,
-                    score,
-                    status
-                )
+                INSERT INTO applications (vacancy_id, applicant_email, score, status)
                 VALUES (?, ?, ?, ?)
             """, (
                 vacancy["id"],
                 profile["email"],
                 score,
-                "Menunggu Kelulusan Pengarah Bahagian Asal"
+                "Menunggu Kelulusan Pengarah Bahagian Asal",
             ))
 
             total_created += 1
 
     conn.commit()
     conn.close()
-
     return total_created
+
+
+def is_demo_data_empty():
+    return count_profiles() == 0 and count_vacancies() == 0
+
+
+def initialize_demo_data():
+    data_dir = Path("data")
+    master_file = data_dir / "master_data_v3_FULL.xlsx"
+    applicants_file = data_dir / "dummy_pemohon_kpm_300_ALIGNED.xlsx"
+    vacancies_file = data_dir / "dummy_iklan_kpm_30_ALIGNED.xlsx"
+
+    if not (master_file.exists() and applicants_file.exists() and vacancies_file.exists()):
+        return False
+
+    import_master_data(master_file)
+    import_applicants_excel(applicants_file)
+    import_vacancies_excel(vacancies_file, "demo@moe.gov.my")
+    auto_generate_dummy_applications(limit_per_applicant=2)
+    return True
+
 
 if __name__ == "__main__":
     create_tables()
     seed_users()
-
     print("===================================")
-    print(" MyGovTalent AI Database v2 Ready")
+    print(" MyGovTalent AI Database v4 Ready")
     print("===================================")
