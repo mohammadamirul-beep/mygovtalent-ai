@@ -2,7 +2,7 @@ import streamlit as st
 
 from database import create_tables, seed_users
 from login import login, logout
-from pages import applicant, bpsm, department, director
+from pages import applicant, bpsm, department, director, kppm
 
 st.set_page_config(
     page_title="MyGovTalent AI",
@@ -34,5 +34,7 @@ if login():
         director.show()
     elif role == "BPSM":
         bpsm.show()
+    elif role == "KPPM":
+        kppm.show()
     else:
         st.error("Role pengguna tidak sah.")
